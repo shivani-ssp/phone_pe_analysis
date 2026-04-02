@@ -12,7 +12,7 @@ import urllib.request
 engine = create_engine("mysql+pymysql://root:12345678@localhost:3306/phone_pe_pulse")
 
 # ─────────────────────────────
-# GEOJSON — download once, save locally, load from disk
+# GEOJSON
 # ─────────────────────────────
 GEOJSON_PATH = "india_states.geojson"
 GEOJSON_URL  = (
@@ -21,14 +21,13 @@ GEOJSON_URL  = (
 )
 
 def get_geojson():
-    """Download GeoJSON once and reuse from disk on every subsequent run."""
     if not os.path.exists(GEOJSON_PATH):
         urllib.request.urlretrieve(GEOJSON_URL, GEOJSON_PATH)
     with open(GEOJSON_PATH, "r") as f:
         return json.load(f)
 
 # ─────────────────────────────
-# STATE NAME MAP  (DB slug → GeoJSON ST_NM)
+# STATE NAME MAP
 # ─────────────────────────────
 STATE_NAME_MAP = {
     "andaman-&-nicobar-islands":              "Andaman & Nicobar",
@@ -81,11 +80,10 @@ def load_years_quarters():
 @st.cache_data(ttl=600)
 def load_transaction_map(year, quarter):
     q = f"""
-        SELECT
-            State,
-            SUM(Transaction_count)  AS Total_transactions,
-            ROUND(SUM(Transaction_amount) / 1e7, 2)                                   AS Total_amount_crores,
-            ROUND(SUM(Transaction_amount) / NULLIF(SUM(Transaction_count), 0), 2)     AS Avg_txn_value
+        SELECT State,
+            SUM(Transaction_count) AS Total_transactions,
+            ROUND(SUM(Transaction_amount)/1e7, 2) AS Total_amount_crores,
+            ROUND(SUM(Transaction_amount)/NULLIF(SUM(Transaction_count),0), 2) AS Avg_txn_value
         FROM aggregated_transaction
         WHERE Year = {year} AND Quarter = {quarter}
         GROUP BY State
@@ -98,8 +96,7 @@ def load_transaction_map(year, quarter):
 @st.cache_data(ttl=600)
 def load_user_map(year, quarter):
     q = f"""
-        SELECT
-            State,
+        SELECT State,
             SUM(Registered_user) AS Total_registered_users,
             SUM(App_opens)       AS Total_app_opens
         FROM map_users
@@ -114,10 +111,9 @@ def load_user_map(year, quarter):
 @st.cache_data(ttl=600)
 def load_category_data(year, quarter):
     q = f"""
-        SELECT
-            Transaction_type,
-            SUM(Transaction_count)  AS Total_count,
-            ROUND(SUM(Transaction_amount) / 1e7, 2) AS Total_amount_crores
+        SELECT Transaction_type,
+            SUM(Transaction_count) AS Total_count,
+            ROUND(SUM(Transaction_amount)/1e7, 2) AS Total_amount_crores
         FROM aggregated_transaction
         WHERE Year = {year} AND Quarter = {quarter}
         GROUP BY Transaction_type
@@ -130,9 +126,9 @@ def load_category_data(year, quarter):
 def load_overall_kpis(year, quarter):
     q = f"""
         SELECT
-            SUM(Transaction_count)  AS Total_transactions,
-            ROUND(SUM(Transaction_amount) / 1e7, 2)                               AS Total_amount_crores,
-            ROUND(SUM(Transaction_amount) / NULLIF(SUM(Transaction_count), 0), 2) AS Avg_txn_value
+            SUM(Transaction_count) AS Total_transactions,
+            ROUND(SUM(Transaction_amount)/1e7, 2) AS Total_amount_crores,
+            ROUND(SUM(Transaction_amount)/NULLIF(SUM(Transaction_count),0), 2) AS Avg_txn_value
         FROM aggregated_transaction
         WHERE Year = {year} AND Quarter = {quarter}
     """
@@ -156,15 +152,14 @@ def load_overall_user_kpis(year, quarter):
 # ─────────────────────────────
 def show_home():
 
-    # ── Header ──
     st.markdown(
         """
-        <div style="background: linear-gradient(135deg,#1a0533 0%,#2d1060 100%);
-                    padding:26px 32px; border-radius:16px; margin-bottom:20px;">
-            <h1 style="color:#a855f7; margin:0; font-size:2.1rem; font-weight:800;">
+        <div style="background:linear-gradient(135deg,#1a0533 0%,#2d1060 100%);
+                    padding:26px 32px;border-radius:16px;margin-bottom:20px;">
+            <h1 style="color:#a855f7;margin:0;font-size:2.1rem;font-weight:800;">
                 📱 PhonePe Pulse Dashboard
             </h1>
-            <p style="color:#c4b5fd; margin:6px 0 0; font-size:0.95rem;">
+            <p style="color:#c4b5fd;margin:6px 0 0;font-size:0.95rem;">
                 Explore India's digital payment landscape — hover over states for live insights.
             </p>
         </div>
@@ -172,15 +167,12 @@ def show_home():
         unsafe_allow_html=True,
     )
 
-    # ── Load GeoJSON (once) ──
     try:
         india_geojson = get_geojson()
     except Exception as e:
-        st.error(f"Could not load India GeoJSON: {e}. "
-                 "Please check your internet connection on first run so the file can be downloaded.")
+        st.error(f"Could not load India GeoJSON: {e}")
         return
 
-    # ── Year / Quarter options ──
     try:
         yq_df    = load_years_quarters()
         years    = sorted(yq_df["Year"].unique().tolist())
@@ -189,9 +181,6 @@ def show_home():
         st.error(f"Database error: {e}")
         return
 
-    # ─────────────────────────────
-    # THREE-COLUMN LAYOUT
-    # ─────────────────────────────
     left_col, map_col, right_col = st.columns([1.1, 3.2, 1.7])
 
     # ══════════════
@@ -205,29 +194,14 @@ def show_home():
         sel_year    = st.selectbox("📅 Year", years, index=len(years) - 1)
         sel_quarter = st.selectbox("📆 Quarter", quarters)
 
+        # ── hardcoded color metric — no selectbox ──
         if view_type == "Transactions":
-            color_metric = st.selectbox(
-                "🎨 Color Map by",
-                ["Total_transactions", "Total_amount_crores", "Avg_txn_value"],
-                format_func=lambda x: {
-                    "Total_transactions":  "Transaction Count",
-                    "Total_amount_crores": "Amount (Crores ₹)",
-                    "Avg_txn_value":       "Avg Txn Value (₹)",
-                }[x],
-            )
+            color_metric = "Total_transactions"
         else:
-            color_metric = st.selectbox(
-                "🎨 Color Map by",
-                ["Total_registered_users", "Total_app_opens"],
-                format_func=lambda x: {
-                    "Total_registered_users": "Registered Users",
-                    "Total_app_opens":        "App Opens",
-                }[x],
-            )
+            color_metric = "Total_registered_users"
 
         st.markdown("---")
 
-        # KPI cards
         try:
             if view_type == "Transactions":
                 kpi   = load_overall_kpis(sel_year, sel_quarter)
@@ -300,10 +274,9 @@ def show_home():
 
             df_map = df_map.dropna(subset=["State_mapped"])
 
-            # ── KEY FIX: pass loaded dict, not a URL string ──
             fig = px.choropleth(
                 df_map,
-                geojson=india_geojson,          # <-- local dict, not a URL
+                geojson=india_geojson,
                 featureidkey="properties.ST_NM",
                 locations="State_mapped",
                 color=color_metric,
@@ -368,46 +341,6 @@ def show_home():
                     </div>""",
                     unsafe_allow_html=True,
                 )
-
             st.markdown("---")
-
-            # Donut chart
-            fig_donut = px.pie(
-                df_cat, names="Transaction_type", values="Total_count",
-                hole=0.52, color_discrete_sequence=accent, title="Count Share",
-            )
-            fig_donut.update_layout(
-                paper_bgcolor="rgba(0,0,0,0)", font_color="#c4b5fd",
-                margin=dict(l=0, r=0, t=28, b=0), height=240,
-                showlegend=False, title_font_color="#c4b5fd", title_font_size=12,
-            )
-            fig_donut.update_traces(
-                textinfo="percent",
-                hovertemplate="<b>%{label}</b><br>%{value:,}<extra></extra>",
-            )
-            st.plotly_chart(fig_donut, use_container_width=True)
-
-            st.markdown("---")
-
-            # Top 5 states table
-            st.markdown("<div style='color:#a855f7;font-size:0.82rem;font-weight:700;"
-                        "margin-bottom:6px;'>🏆 Top 5 States</div>", unsafe_allow_html=True)
-            try:
-                top5 = load_transaction_map(sel_year, sel_quarter)
-                top5 = (
-                    top5.nlargest(5, "Total_transactions")
-                    [["State_mapped", "Total_transactions", "Total_amount_crores"]]
-                    .rename(columns={
-                        "State_mapped":       "State",
-                        "Total_transactions": "Txns",
-                        "Total_amount_crores":"Amt (Cr)",
-                    })
-                    .reset_index(drop=True)
-                )
-                top5.index += 1
-                st.dataframe(top5, use_container_width=True, height=200)
-            except Exception:
-                pass
-
         except Exception as e:
             st.error(f"Category error: {e}")
